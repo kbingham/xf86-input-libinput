@@ -108,4 +108,10 @@
 /* Middle button emulation: BOOL, 1 value, read-only */
 #define LIBINPUT_PROP_MIDDLE_EMULATION_ENABLED_DEFAULT "libinput Middle Emulation Enabled Default"
 
+/* Halfkey Accessibility: BOOL, 1 value */
+#define LIBINPUT_PROP_HALFKEY_ENABLED "libinput Halfkey Accessibility Enabled"
+
+/* Halfkey Accessibility: BOOL, 1 value, read-only */
+#define LIBINPUT_PROP_HALFKEY_ENABLED_DEFAULT "libinput Halfkey Accessibility Enabled Default"
+
 #endif /* _LIBINPUT_PROPERTIES_H_ */

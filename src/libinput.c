@@ -102,6 +102,7 @@ struct xf86libinput {
 		BOOL natural_scrolling;
 		BOOL left_handed;
 		BOOL middle_emulation;
+		BOOL halfkey;
 		CARD32 sendevents;
 		CARD32 scroll_button; /* xorg button number */
 		float speed;
@@ -338,6 +339,13 @@ LibinputApplyConfig(DeviceIntPtr dev)
 		xf86IDrvMsg(pInfo, X_ERROR,
 			    "Failed to set MiddleEmulation to %d\n",
 			    driver_data->options.middle_emulation);
+
+	if (libinput_device_config_halfkey_is_available(device) &&
+	    libinput_device_config_halfkey_set_enabled(device,
+						       driver_data->options.halfkey) != LIBINPUT_CONFIG_STATUS_SUCCESS)
+		xf86IDrvMsg(pInfo, X_ERROR,
+			    "Failed to set Halfkey Accessiblity support to %d\n",
+			    driver_data->options.halfkey);
 }
 
 static int
@@ -1330,6 +1338,29 @@ xf86libinput_parse_middleemulation_option(InputInfoPtr pInfo,
 	return enabled;
 }
 
+static inline BOOL
+xf86libinput_parse_halfkey_option(InputInfoPtr pInfo,
+				  struct libinput_device *device)
+{
+	BOOL enabled;
+
+	if (!libinput_device_config_halfkey_is_available(device))
+		return FALSE;
+
+	enabled = xf86SetBoolOption(pInfo->options,
+				    "Halfkey",
+				    libinput_device_config_halfkey_get_default_enabled(device));
+	if (libinput_device_config_halfkey_set_enabled(device, enabled) !=
+	    LIBINPUT_CONFIG_STATUS_SUCCESS) {
+		xf86IDrvMsg(pInfo, X_ERROR,
+			    "Failed to set Halfkey Accessiblity to %d\n",
+			    enabled);
+		enabled = libinput_device_config_halfkey_get_enabled(device);
+	}
+
+	return enabled;
+}
+
 static void
 xf86libinput_parse_buttonmap_option(InputInfoPtr pInfo,
 				    unsigned char *btnmap,
@@ -1383,6 +1414,7 @@ xf86libinput_parse_options(InputInfoPtr pInfo,
 	options->scroll_button = xf86libinput_parse_scrollbutton_option(pInfo, device);
 	options->click_method = xf86libinput_parse_clickmethod_option(pInfo, device);
 	options->middle_emulation = xf86libinput_parse_middleemulation_option(pInfo, device);
+	options->halfkey = xf86libinput_parse_halfkey_option(pInfo, device);
 	xf86libinput_parse_calibration_option(pInfo, device, driver_data->options.matrix);
 
 	/* non-libinput options */
@@ -1579,6 +1611,8 @@ static Atom prop_click_method_enabled;
 static Atom prop_click_method_default;
 static Atom prop_middle_emulation;
 static Atom prop_middle_emulation_default;
+static Atom prop_halfkey;
+static Atom prop_halfkey_default;
 
 /* general properties */
 static Atom prop_float;
@@ -1988,6 +2022,37 @@ LibinputSetPropertyMiddleEmulation(DeviceIntPtr dev,
 	return Success;
 }
 
+static inline int
+LibinputSetPropertyHalfkey(DeviceIntPtr dev,
+			   Atom atom,
+			   XIPropertyValuePtr val,
+			   BOOL checkonly)
+{
+	InputInfoPtr pInfo = dev->public.devicePrivate;
+	struct xf86libinput *driver_data = pInfo->private;
+	struct libinput_device *device = driver_data->device;
+	BOOL* data;
+
+	if (val->format != 8 || val->size != 1 || val->type != XA_INTEGER)
+		return BadMatch;
+
+	data = (BOOL*)val->data;
+	if (checkonly) {
+		if (*data != 0 && *data != 1)
+			return BadValue;
+
+		if (!xf86libinput_check_device(dev, atom))
+			return BadMatch;
+
+		if (!libinput_device_config_halfkey_is_available(device))
+			return BadMatch;
+	} else {
+		driver_data->options.halfkey = *data;
+	}
+
+	return Success;
+}
+
 static int
 LibinputSetProperty(DeviceIntPtr dev, Atom atom, XIPropertyValuePtr val,
                  BOOL checkonly)
@@ -2023,6 +2088,8 @@ LibinputSetProperty(DeviceIntPtr dev, Atom atom, XIPropertyValuePtr val,
 		rc = LibinputSetPropertyClickMethod(dev, atom, val, checkonly);
 	else if (atom == prop_middle_emulation)
 		rc = LibinputSetPropertyMiddleEmulation(dev, atom, val, checkonly);
+	else if (atom == prop_halfkey)
+		rc = LibinputSetPropertyHalfkey(dev, atom, val, checkonly);
 	else if (atom == prop_device || atom == prop_product_id ||
 		 atom == prop_tap_default ||
 		 atom == prop_tap_drag_lock_default ||
@@ -2034,7 +2101,8 @@ LibinputSetProperty(DeviceIntPtr dev, Atom atom, XIPropertyValuePtr val,
 		 atom == prop_scroll_method_default ||
 		 atom == prop_scroll_button_default ||
 		 atom == prop_click_method_default ||
-		 atom == prop_middle_emulation_default)
+		 atom == prop_middle_emulation_default ||
+		 atom == prop_halfkey_default)
 		return BadAccess; /* read-only */
 	else
 		return Success;
@@ -2464,6 +2532,33 @@ LibinputInitMiddleEmulationProperty(DeviceIntPtr dev,
 }
 
 static void
+LibinputInitHalfkeyProperty(DeviceIntPtr dev,
+			    struct xf86libinput *driver_data,
+			    struct libinput_device *device)
+{
+	BOOL halfkey = driver_data->options.halfkey;
+
+	if (!libinput_device_config_halfkey_is_available(device))
+		return;
+
+	prop_halfkey = LibinputMakeProperty(dev,
+					    LIBINPUT_PROP_HALFKEY_ENABLED,
+					    XA_INTEGER,
+					    8,
+					    1,
+					    &halfkey);
+	if (!prop_halfkey)
+		return;
+
+	halfkey = libinput_device_config_halfkey_get_default_enabled(device);
+	prop_halfkey_default = LibinputMakeProperty(dev,
+						    LIBINPUT_PROP_HALFKEY_ENABLED_DEFAULT,
+						    XA_INTEGER, 8,
+						    1,
+						    &halfkey);
+}
+
+static void
 LibinputInitProperty(DeviceIntPtr dev)
 {
 	InputInfoPtr pInfo  = dev->public.devicePrivate;
@@ -2485,6 +2580,7 @@ LibinputInitProperty(DeviceIntPtr dev)
 	LibinputInitScrollMethodsProperty(dev, driver_data, device);
 	LibinputInitClickMethodsProperty(dev, driver_data, device);
 	LibinputInitMiddleEmulationProperty(dev, driver_data, device);
+	LibinputInitHalfkeyProperty(dev, driver_data, device);
 
 	/* Device node property, read-only  */
 	device_node = driver_data->path;
